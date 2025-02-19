@@ -6,6 +6,9 @@
 package device
 
 import (
+	"encoding/base64"
+	"encoding/hex"
+	"net/netip"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -226,14 +229,25 @@ func (device *Device) IsUnderLoad() bool {
 	return device.rate.underLoadUntil.Load() > now.UnixNano()
 }
 
-func (device *Device) SetPrivateKey(sk NoisePrivateKey) error {
+func NoisePrivateKeyFromString(privateKey string) NoisePrivateKey {
+	var key NoisePrivateKey
+	b, _ := base64.StdEncoding.DecodeString(privateKey)
+	_ = loadExactHex(key[:], hex.EncodeToString(b[:]))
+	key.clamp()
+	return key
+}
+
+func (device *Device) SetPrivateKey(privateKey string) *Device {
+
+	sk := NoisePrivateKeyFromString(privateKey)
+
 	// lock required resources
 
 	device.staticIdentity.Lock()
 	defer device.staticIdentity.Unlock()
 
 	if sk.Equals(device.staticIdentity.privateKey) {
-		return nil
+		return device
 	}
 
 	device.peers.Lock()
@@ -278,7 +292,77 @@ func (device *Device) SetPrivateKey(sk NoisePrivateKey) error {
 		peer.ExpireCurrentKeypairs()
 	}
 
-	return nil
+	return device
+}
+
+func NoisePublicKeyFromString(publicKey string) NoisePublicKey {
+	var key NoisePublicKey
+	b, _ := base64.StdEncoding.DecodeString(publicKey)
+	_ = loadExactHex(key[:], hex.EncodeToString(b[:]))
+	return key
+}
+
+func (device *Device) SetPublicKey(publicKey string) *IpcSetPeer {
+	peer := new(IpcSetPeer)
+
+	// Load/create the peer we are configuring.
+	sk := NoisePublicKeyFromString(publicKey)
+
+	// Ignore peer with the same public key as this device.
+	device.staticIdentity.RLock()
+	peer.dummy = device.staticIdentity.publicKey.Equals(sk)
+	device.staticIdentity.RUnlock()
+
+	if peer.dummy {
+		peer.Peer = &Peer{}
+	} else {
+		peer.Peer = device.LookupPeer(sk)
+	}
+
+	if peer.Peer == nil {
+		var err error
+		peer.Peer, err = device.NewPeer(sk)
+		if err != nil {
+			device.log.Errorf("failed to create new peer: %w", err)
+		}
+	}
+	return peer
+}
+
+func (device *Device) SetEndpoint(peer *IpcSetPeer, addr string) *Device {
+	endpoint, _ := device.Bind().ParseEndpoint(addr)
+	peer.endpoint.Lock()
+	defer peer.endpoint.Unlock()
+	peer.endpoint.val = endpoint
+	return device
+}
+
+func (device *Device) SetAllowedIP(peer *IpcSetPeer) *Device {
+	allowedIps := []string{"0.0.0.0/0", "::/0"}
+	for _, ipCidr := range allowedIps {
+		prefix, _ := netip.ParsePrefix(ipCidr)
+		if peer.dummy {
+			return device
+		}
+		device.allowedips.Insert(prefix, peer.Peer)
+	}
+	return device
+}
+
+func (peer *IpcSetPeer) HandlePostConfig() {
+	if peer.Peer == nil || peer.dummy {
+		return
+	}
+	if peer.created {
+		peer.endpoint.disableRoaming = peer.device.net.brokenRoaming && peer.endpoint.val != nil
+	}
+	if peer.device.isUp() {
+		peer.Start()
+		if peer.pkaOn {
+			peer.SendKeepalive()
+		}
+		peer.SendStagedPackets()
+	}
 }
 
 func NewDevice(tunDevice tun.Device, bind conn.Bind, logger *Logger) *Device {

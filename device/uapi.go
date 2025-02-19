@@ -147,7 +147,7 @@ func (device *Device) IpcSetOperation(r io.Reader) (err error) {
 		}
 	}()
 
-	peer := new(ipcSetPeer)
+	peer := new(IpcSetPeer)
 	deviceConfig := true
 
 	scanner := bufio.NewScanner(r)
@@ -197,13 +197,8 @@ func (device *Device) IpcSetOperation(r io.Reader) (err error) {
 func (device *Device) handleDeviceLine(key, value string) error {
 	switch key {
 	case "private_key":
-		var sk NoisePrivateKey
-		err := sk.FromMaybeZeroHex(value)
-		if err != nil {
-			return ipcErrorf(ipc.IpcErrorInvalid, "failed to set private_key: %w", err)
-		}
 		device.log.Verbosef("UAPI: Updating private key")
-		device.SetPrivateKey(sk)
+		device.SetPrivateKey(value)
 
 	case "listen_port":
 		port, err := strconv.ParseUint(value, 10, 16)
@@ -247,15 +242,15 @@ func (device *Device) handleDeviceLine(key, value string) error {
 	return nil
 }
 
-// An ipcSetPeer is the current state of an IPC set operation on a peer.
-type ipcSetPeer struct {
+// An IpcSetPeer is the current state of an IPC set operation on a peer.
+type IpcSetPeer struct {
 	*Peer        // Peer is the current peer being operated on
 	dummy   bool // dummy reports whether this peer is a temporary, placeholder peer
 	created bool // new reports whether this is a newly created peer
 	pkaOn   bool // pkaOn reports whether the peer had the persistent keepalive turn on
 }
 
-func (peer *ipcSetPeer) handlePostConfig() {
+func (peer *IpcSetPeer) handlePostConfig() {
 	if peer.Peer == nil || peer.dummy {
 		return
 	}
@@ -271,7 +266,7 @@ func (peer *ipcSetPeer) handlePostConfig() {
 	}
 }
 
-func (device *Device) handlePublicKeyLine(peer *ipcSetPeer, value string) error {
+func (device *Device) handlePublicKeyLine(peer *IpcSetPeer, value string) error {
 	// Load/create the peer we are configuring.
 	var publicKey NoisePublicKey
 	err := publicKey.FromHex(value)
@@ -301,7 +296,7 @@ func (device *Device) handlePublicKeyLine(peer *ipcSetPeer, value string) error 
 	return nil
 }
 
-func (device *Device) handlePeerLine(peer *ipcSetPeer, key, value string) error {
+func (device *Device) handlePeerLine(peer *IpcSetPeer, key, value string) error {
 	switch key {
 	case "update_only":
 		// allow disabling of creation
