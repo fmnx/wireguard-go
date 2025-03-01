@@ -46,6 +46,12 @@ type StdNetBind struct {
 
 	blackhole4 bool
 	blackhole6 bool
+
+	reserved []byte
+}
+
+func (s *StdNetBind) SetReserved(reserved []byte) {
+	s.reserved = reserved
 }
 
 func NewStdNetBind() Bind {
@@ -70,6 +76,8 @@ func NewStdNetBind() Bind {
 				return &msgs
 			},
 		},
+
+		reserved: make([]byte, 3),
 	}
 }
 
@@ -236,6 +244,15 @@ func (s *StdNetBind) receiveIP(
 		(*msgs)[i].Buffers[0] = bufs[i]
 		(*msgs)[i].OOB = (*msgs)[i].OOB[:cap((*msgs)[i].OOB)]
 	}
+
+	defer func() {
+		for i, _ := range bufs {
+			bufs[i][1] = 0
+			bufs[i][2] = 0
+			bufs[i][3] = 0
+		}
+	}()
+
 	defer s.putMessages(msgs)
 	var numMsgs int
 	if runtime.GOOS == "linux" || runtime.GOOS == "android" {
@@ -340,6 +357,11 @@ func (e ErrUDPGSODisabled) Unwrap() error {
 
 func (s *StdNetBind) Send(bufs [][]byte, endpoint Endpoint) error {
 	s.mu.Lock()
+	for i, _ := range bufs {
+		bufs[i][1] = s.reserved[0]
+		bufs[i][2] = s.reserved[1]
+		bufs[i][3] = s.reserved[2]
+	}
 	blackhole := s.blackhole4
 	conn := s.ipv4
 	offload := s.ipv4TxOffload
