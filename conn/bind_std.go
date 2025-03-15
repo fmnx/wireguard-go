@@ -246,10 +246,8 @@ func (s *StdNetBind) receiveIP(
 	}
 
 	defer func() {
-		for i, _ := range bufs {
-			bufs[i][1] = 0
-			bufs[i][2] = 0
-			bufs[i][3] = 0
+		for _, buf := range bufs {
+			buf[1], buf[2], buf[3] = 0, 0, 0
 		}
 	}()
 
@@ -357,10 +355,8 @@ func (e ErrUDPGSODisabled) Unwrap() error {
 
 func (s *StdNetBind) Send(bufs [][]byte, endpoint Endpoint) error {
 	s.mu.Lock()
-	for i, _ := range bufs {
-		bufs[i][1] = s.reserved[0]
-		bufs[i][2] = s.reserved[1]
-		bufs[i][3] = s.reserved[2]
+	for _, buf := range bufs {
+		copy(buf[1:4], s.reserved)
 	}
 	blackhole := s.blackhole4
 	conn := s.ipv4
