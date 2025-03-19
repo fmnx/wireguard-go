@@ -75,6 +75,8 @@ type WinRingBind struct {
 	v4, v6 afWinRingBind
 	mu     sync.RWMutex
 	isOpen atomic.Uint32 // 0, 1, or 2
+
+	reserved []byte
 }
 
 func NewDefaultBind() Bind { return NewWinRingBind() }
@@ -83,7 +85,13 @@ func NewWinRingBind() Bind {
 	if !winrio.Initialize() {
 		return NewStdNetBind()
 	}
-	return new(WinRingBind)
+	return &WinRingBind{
+		reserved: make([]byte, 3),
+	}
+}
+
+func (bind *WinRingBind) SetReserved(reserved []byte) {
+	bind.reserved = reserved
 }
 
 type WinRingEndpoint struct {
@@ -419,18 +427,22 @@ retry:
 func (bind *WinRingBind) receiveIPv4(bufs [][]byte, sizes []int, eps []Endpoint) (int, error) {
 	bind.mu.RLock()
 	defer bind.mu.RUnlock()
-	n, ep, err := bind.v4.Receive(bufs[0], &bind.isOpen)
+	buf := bufs[0]
+	n, ep, err := bind.v4.Receive(buf, &bind.isOpen)
 	sizes[0] = n
 	eps[0] = ep
+	buf[1], buf[2], buf[3] = 0, 0, 0
 	return 1, err
 }
 
 func (bind *WinRingBind) receiveIPv6(bufs [][]byte, sizes []int, eps []Endpoint) (int, error) {
 	bind.mu.RLock()
 	defer bind.mu.RUnlock()
-	n, ep, err := bind.v6.Receive(bufs[0], &bind.isOpen)
+	buf := bufs[0]
+	n, ep, err := bind.v6.Receive(buf, &bind.isOpen)
 	sizes[0] = n
 	eps[0] = ep
+	buf[1], buf[2], buf[3] = 0, 0, 0
 	return 1, err
 }
 
@@ -494,6 +506,7 @@ func (bind *WinRingBind) Send(bufs [][]byte, endpoint Endpoint) error {
 	bind.mu.RLock()
 	defer bind.mu.RUnlock()
 	for _, buf := range bufs {
+		copy(buf[1:4], bind.reserved)
 		switch nend.family {
 		case windows.AF_INET:
 			if bind.v4.blackhole {
