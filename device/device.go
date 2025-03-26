@@ -329,6 +329,10 @@ func (device *Device) SetPublicKey(publicKey string) *IpcSetPeer {
 	return peer
 }
 
+func (device *Device) SetPort(port uint16) {
+	device.net.port = port
+}
+
 func (device *Device) SetEndpoint(peer *IpcSetPeer, addr string) *Device {
 	endpoint, _ := device.Bind().ParseEndpoint(addr)
 	peer.endpoint.Lock()
